@@ -24,12 +24,16 @@ spec:
       containers:
         - name: hello-world
           image: helloworld-webserver:1.0
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           env:
           - name: APPLICATION_NAME
             value: "helloworld-statefulset"
           - name: SERVICE_NAME
             value: "helloworld-allpods-svc"
+          - name: HEALTH_PATH
+            value: "/health"
+          - name: APPLICATION_PORT
+            value: "8080"
           command:
           - bash
           - -c
@@ -42,10 +46,16 @@ spec:
               echo "$(getTimestamp) $1" | tee -a /loadbalancer.$(date +"%Y%m%d").log
             }
             getActivePods() {
-              kubectl get pods -l role=active -o jsonpath='{range .items[]}{.metadata.name}{"\n"}{end}' | grep ^${APPLICATION_NAME}-[0-9]*$
+              output=$(kubectl get pods -l role=active)
+              if [ ! -z "$output" ]; then
+                kubectl get pods -l role=active -o jsonpath='{range .items[]}{.metadata.name}{"\n"}{end}' | grep ^${APPLICATION_NAME}-[0-9]*$
+              fi
             }
             getPassivePods() {
-              kubectl get pods -l role=passive -o jsonpath='{range .items[]}{.metadata.name}{"\n"}{end}' | grep ^${APPLICATION_NAME}-[0-9]*$
+              output=$(kubectl get pods -l role=passive)
+              if [ ! -z "$output" ]; then
+                kubectl get pods -l role=passive -o jsonpath='{range .items[]}{.metadata.name}{"\n"}{end}' | grep ^${APPLICATION_NAME}-[0-9]*$
+              fi
             }
 
             writeLog "Starting..."
@@ -57,18 +67,29 @@ spec:
               writeLog "$passive is the passive pod"
 
               if [ -z "$active" ]; then 
-                 kubectl patch pod ${APPLICATION_NAME}-0 -p '{"metadata": {"labels": {"role":"active"}}}';
-                 kubectl patch pod ${APPLICATION_NAME}-1 -p '{"metadata": {"labels": {"role":"passive"}}}';
+                 kubectl patch pod ${APPLICATION_NAME}-1 -p '{"metadata": {"labels": {"role":"active"}}}';
+                 kubectl patch pod ${APPLICATION_NAME}-0 -p '{"metadata": {"labels": {"role":"passive"}}}';
               fi
 
               # Detect status of both active and passive pods
-              active_http_response=$(curl -s -o /dev/null -I -w "%{http_code}" http://$active.${SERVICE_NAME}:8080/health)  
+              active_http_response=$(curl -s -o /dev/null -I -w "%{http_code}" http://$active.${SERVICE_NAME}:${APPLICATION_PORT}${HEALTH_PATH})  
               writeLog "Active pod HTTP response: $active_http_response"
-              passive_http_response=$(curl -s -o /dev/null -I -w "%{http_code}" http://$passive.${SERVICE_NAME}:8080/health)
+              passive_http_response=$(curl -s -o /dev/null -I -w "%{http_code}" http://$passive.${SERVICE_NAME}:${APPLICATION_PORT}${HEALTH_PATH})
               writeLog "Passive pod HTTP response: $passive_http_response"
 
               if [ "$active_http_response" = "200" ]; then
                 writeLog "Active node passed healthcheck"
+                # if passive pod is missing patch it back
+                if [ -z "$passive" ]; then 
+                   writeLog "Passive role is missing"
+                  if [ "$active" = ${APPLICATION_NAME}-0 ]; then 
+                    writeLog "Add ${APPLICATION_NAME}-1 to passive"
+                    kubectl patch pod ${APPLICATION_NAME}-1 -p '{"metadata": {"labels": {"role":"passive"}}}';
+                  else
+                    writeLog "Add ${APPLICATION_NAME}-1 to passive"
+                    kubectl patch pod ${APPLICATION_NAME}-0 -p '{"metadata": {"labels": {"role":"passive"}}}';
+                  fi
+                fi
               else
                 writeLog "Detected application health failure"
                 if [ "$passive_http_response" = "200" ]; then

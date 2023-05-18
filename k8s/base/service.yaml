@@ -25,7 +25,6 @@ metadata:
 spec:
   selector:
     app.kubernetes.io/name: helloworld-statefulset
-    #app.kubernetes.io/instance: main
   clusterIP: None
   ports:
     - name: http
