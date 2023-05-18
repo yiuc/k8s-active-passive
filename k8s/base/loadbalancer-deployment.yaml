@@ -19,10 +19,17 @@ spec:
       labels:
         app.kubernetes.io/name: loadbalancer-deployment
     spec:                 
+      serviceAccountName: sa-loadbalancer
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: hello-world
           image: helloworld-webserver:1.0
           imagePullPolicy: IfNotPresent
+          env:
+          - name: APPLICATION_NAME
+            value: "helloworld-statefulset"
+          - name: SERVICE_NAME
+            value: "helloworld-allpods-svc"
           command:
           - bash
           - -c
@@ -35,10 +42,10 @@ spec:
               echo "$(getTimestamp) $1" | tee -a /loadbalancer.$(date +"%Y%m%d").log
             }
             getActivePods() {
-              kubectl get pods -l role=active -o jsonpath='{range .items[]}{.metadata.name}{"\n"}{end}' | grep ^helloworld-statefulset-[0-9]*$
+              kubectl get pods -l role=active -o jsonpath='{range .items[]}{.metadata.name}{"\n"}{end}' | grep ^${APPLICATION_NAME}-[0-9]*$
             }
             getPassivePods() {
-              kubectl get pods -l role=passive -o jsonpath='{range .items[]}{.metadata.name}{"\n"}{end}' | grep ^helloworld-statefulset-[0-9]*$
+              kubectl get pods -l role=passive -o jsonpath='{range .items[]}{.metadata.name}{"\n"}{end}' | grep ^${APPLICATION_NAME}-[0-9]*$
             }
 
             writeLog "Starting..."
@@ -50,14 +57,14 @@ spec:
               writeLog "$passive is the passive pod"
 
               if [ -z "$active" ]; then 
-                 kubectl patch pod helloworld-statefulset-0 -p '{"metadata": {"labels": {"role":"active"}}}';
-                 kubectl patch pod helloworld-statefulset-1 -p '{"metadata": {"labels": {"role":"passive"}}}';
+                 kubectl patch pod ${APPLICATION_NAME}-0 -p '{"metadata": {"labels": {"role":"active"}}}';
+                 kubectl patch pod ${APPLICATION_NAME}-1 -p '{"metadata": {"labels": {"role":"passive"}}}';
               fi
 
               # Detect status of both active and passive pods
-              active_http_response=$(curl -s -o /dev/null -I -w "%{http_code}" http://$active.helloworld-allpods-svc:8080/health)  
+              active_http_response=$(curl -s -o /dev/null -I -w "%{http_code}" http://$active.${SERVICE_NAME}:8080/health)  
               writeLog "Active pod HTTP response: $active_http_response"
-              passive_http_response=$(curl -s -o /dev/null -I -w "%{http_code}" http://$passive.helloworld-allpods-svc:8080/health)
+              passive_http_response=$(curl -s -o /dev/null -I -w "%{http_code}" http://$passive.${SERVICE_NAME}:8080/health)
               writeLog "Passive pod HTTP response: $passive_http_response"
 
               if [ "$active_http_response" = "200" ]; then

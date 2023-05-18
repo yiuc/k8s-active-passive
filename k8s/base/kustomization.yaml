@@ -4,6 +4,7 @@ resources:
 - service.yaml
 - role.yaml
 - rolebinding.yaml
+- sa.yaml
 
 generatorOptions:
  disableNameSuffixHash: true

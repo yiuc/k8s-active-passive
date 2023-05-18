@@ -27,7 +27,7 @@ spec:
                 - helloworld
       containers:
         - name: hello-world
-          image: helloworld-webserver:1.0
+          image: mendhak/http-https-echo:26
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
